@@ -2,7 +2,7 @@ pipeline {
     agent none
     options {
         ansiColor("xterm")
-        timeout(time: 6, unit: "HOURS")
+        timeout(time: 4, unit: "HOURS")
         timestamps()
     }
     parameters {
@@ -45,6 +45,7 @@ pipeline {
             steps {
                 sh "echo ${BUILD_URL} > build.txt"
                 s3Upload(bucket: BRAVE_ARTIFACTS_S3_BUCKET, path: BUILD_TAG_SLASHED, includePathPattern: "build.txt")
+                buildName env.BUILD_NUMBER + "-" + BRANCH + "-" + env.GIT_COMMIT.substring(0, 7)
             }
         }
         stage("build-all") {
@@ -438,7 +439,6 @@ pipeline {
                         stage("checkout") {
                             steps {
                                 checkout([$class: "GitSCM", branches: [[name: BRANCH]], extensions: [[$class: WIPE_WORKSPACE]], userRemoteConfigs: [[url: "https://github.com/brave/brave-browser.git"]]])
-                                buildName env.BUILD_NUMBER + "-" + BRANCH + "-" + env.GIT_COMMIT.substring(0, 7)
                             }
                         }
                         stage("pin") {
@@ -841,7 +841,7 @@ def setEnv() {
         def bcPrDetails = readJSON(text: httpRequest(url: GITHUB_API + "/brave-core/pulls?head=brave:" + BRANCH, authentication: GITHUB_CREDENTIAL_ID, quiet: !DEBUG).content)[0]
         if (bcPrDetails) {
             env.BC_PR_NUMBER = bcPrDetails.number
-            bcPrDetails = readJSON(text: httpRequest(url: GITHUB_API + "/brave-core/pulls/" +  env.BC_PR_NUMBER, authentication: GITHUB_CREDENTIAL_ID, quiet: !DEBUG).content)
+            bcPrDetails = readJSON(text: httpRequest(url: GITHUB_API + "/brave-core/pulls/" + env.BC_PR_NUMBER, authentication: GITHUB_CREDENTIAL_ID, quiet: !DEBUG).content)
             BASE_BRANCH = bcPrDetails.base.ref
             SKIP = bcPrDetails.mergeable_state.equals("draft") || bcPrDetails.labels.count { label -> label.name.equalsIgnoreCase("CI/skip") }.equals(1)
             SKIP_ANDROID = SKIP_ANDROID || bcPrDetails.labels.count { label -> label.name.equalsIgnoreCase("CI/skip-android") }.equals(1)
@@ -880,18 +880,6 @@ def checkAndAbortBuild() {
             SKIP = true
             stopCurrentBuild()
         }
-    }
-    def bb_package_json = readJSON(text: httpRequest(url: "https://raw.githubusercontent.com/brave/brave-browser/" + BRANCH + "/package.json", quiet: !DEBUG).content)
-    def bb_version = bb_package_json.version
-    def bc_branch = bb_package_json.config.projects["brave-core"].branch
-    if (BRANCH_EXISTS_IN_BC) {
-        bc_branch = BRANCH
-    }
-    def bc_version = readJSON(text: httpRequest(url: "https://raw.githubusercontent.com/brave/brave-core/" + bc_branch + "/package.json", quiet: !DEBUG).content).version
-    if (bb_version != bc_version) {
-        echo "Version mismatch between brave-browser (" + BRANCH + "/" + bb_version + ") and brave-core (" + bc_branch + "/" + bc_version + ") in package.json"
-        SKIP = true
-        stopCurrentBuild()
     }
     if (!SKIP) {
         for (build in getBuilds()) {
